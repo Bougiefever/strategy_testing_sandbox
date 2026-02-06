@@ -1,0 +1,70 @@
+Gold -
+
+30 min EMA - above: sell ATM put  sell $1 OTM call
+             below: sell ATM call sell $1 OTM put
+
+Enter 15 min after market open
+Exit 15 min before market close
+
+0 DTE
+
+-----------------------------------
+
+GLD 
+* above 200 SMA
+* 15 delta put - 90 dte sell
+50% profit or 200% stop loss
+
+Enter every day
+
+
+--------------------------------------------
+21-RSI XAU/USD GLD
+
+Allocation graduated for RSI level
+Max allocation @ 75% (max allocation = 100%)
+
+Allocate 4% for every 1 RSI 
+
+RSI > 50 long
+RSI < 50 short
+
+
+Earnings
+-----------------------
+EPS surprise, revenue surprise
+
+How far ROC from 
+
+stop loss low of day - 
+enter on open range breakout 
+
+earnings gap 10% 
+earnings surprise > ??
+Rel vol - first 5 minutes - 10% - 20% of avg daily volume
+
+
+
+Before mkt open eps surprise % - gap 7% - rev %
+
+exit after 2-3 red days
+exit 1/3 on 10d ma
+2/3 20d ma
+
+Trim every day down to 2%
+
+------------------------
+SPY
+makes new day low last 15 min - 
+close above prev day high
+
+
+entry: IBS < 0.2 - buy
+
+1st test - buy stock
+
+30 delta calls? 20dte - 10 - 30  -45
+
+
+
+
