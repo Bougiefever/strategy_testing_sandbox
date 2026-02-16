@@ -9,6 +9,7 @@ from utility import *
 # get the earnings data
 earn_data_fn = Path(r'D:\stock_data\earnings_data.csv')
 stock_data_folder = Path(r'D:\stock_data\daily_stock_prices')
+calcs_folder = Path(r'D:\stock_data\calcs')
 df_earn = pd.read_csv(earn_data_fn, index_col='Earnings_Date', parse_dates=True)
 df_earn.sort_values(by=['Earnings_Date', 'Symbol'], inplace=True)
 start_date = pd.to_datetime(datetime.datetime(2021, 5, 11))
@@ -20,38 +21,20 @@ _spy.set_index('quote_datetime', inplace=True)
 _spy.sort_index(inplace=True)
 dts = _spy.loc[start_date:].index.values.tolist()
 
-# df_earn['trade_date'] = pd.NaT
-# for row in df_earn.itertuples():
-#     dt = row[0]
-#     when = row.BMO_AMC
-#     ticker = row.Symbol
-#     if when == "BMO":
-#         trade_dt = dt
-#     elif when == "AMC":
-#         find_dt = dt
-#         if find_dt not in _spy.index:
-#             while find_dt not in _spy.index:
-#                 find_dt = find_dt + pd.Timedelta(days=1) # data has day before for AMC date, which is sometimes not a market day
-#             trade_dt = find_dt
-#         else:
-#             i = _spy.index.get_loc(find_dt)
-#             trade_dt = _spy.iloc[i+1].name
-#     else:
-#         trade_dt = pd.NaT
-#
-#     df_earn.loc[(df_earn.index == dt) & (df_earn['Symbol'] == ticker), 'trade_date'] = trade_dt
-
-
-
 # get all the stock data
 symbols = df_earn['Symbol'].unique()
-#symbols = df_earn.loc[pd.to_datetime(start_date) + pd.Timedelta(days=1), 'Symbol'].tolist()
+symbols.sort()
+
 dfs = defaultdict(pd.DataFrame)
-for symbol in symbols[:]:
+for symbol in symbols:
+    print(symbol)
     fn = stock_data_folder.joinpath(f'{symbol}_.parquet')
-    if not fn.exists():
+    calc_fn = calcs_folder.joinpath(f'{symbol}_calcs.parquet')
+    if not fn.exists() or not calc_fn.exists():
         continue
     df_stock = pd.read_parquet(fn, columns=['symbol', 'quote_datetime', 'open', 'high', 'low', 'close', 'volume', 'close_orig'], engine="pyarrow")
+    df_calc = pd.read_parquet(calc_fn, columns=['symbol', 'quote_datetime', 'adv_30d_dollar', 'atr'], engine="pyarrow")
+    df_stock = df_stock.merge(df_calc, on=['symbol', 'quote_datetime'], how='left')
     df_stock.set_index('quote_datetime', inplace=True)
     df_stock.sort_index(inplace=True)
     df_stock['adv_30d'] = (df_stock['volume'].rolling(window=30, min_periods=30).mean()*df_stock['close_orig']).shift(1)
@@ -77,7 +60,7 @@ for dt in dts:
         ticker = row.Symbol
         when = row.BMO_AMC
         trade_dt = row.trade_date
-        if trade_dt == pd.NaT:
+        if pd.isna(trade_dt):
             print(f'{dt}, {ticker} ***********************************************************  no trade date')
             continue
         print(dt, ticker, equity)
@@ -85,8 +68,11 @@ for dt in dts:
         df = dfs.get(ticker)
         if df is None:
             continue
+        if not trade_dt in df.index:
+            continue
         df_row = df.loc[trade_dt]
-
+        if df_row['adv_30d'] < 5_000_000:
+            continue
         roc_ma = row.ROC_100D_SMA
         gap = row.Earnings_Gap_Pct
         earn_surprise = row.Earnings_Surprise_Pct
@@ -107,7 +93,7 @@ for dt in dts:
             entry_px = df_row['open']
             high_px = df_row['high']
             low_px = df_row['low']
-            #exit_px = df_row['close']
+
             direction = "short" if short_ok else "long"
             entry_dt = pd.Timestamp(f"{df_row.name.date()} {open_time}")
             exit_dt = pd.Timestamp(f"{df_row.name.date()} {close_time}")
