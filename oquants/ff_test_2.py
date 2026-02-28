@@ -18,7 +18,7 @@ from utility import *
 # Select 30/60 calendars
 
 start_date = datetime.datetime(2023, 1, 1)
-end_date = datetime.datetime(2023, 3, 1)
+end_date = datetime.datetime(2025, 1, 1)
 front_month_dte = 30
 back_month_dte = 60
 buffer = 5
@@ -132,7 +132,8 @@ for dt in dts:
 
 check_positions = portfolio.positions.copy()
 for p in check_positions:
-    portfolio.close_position(p)
+    #print(p.instance_id)
+    portfolio.close_position(p, close_spot_price=p.spot_price)
 
 trades = [{
     'id':x.instance_id,
@@ -170,34 +171,13 @@ trades = [{
     'back_dte_at_open':x.user_defined['back_dte'],
     'forward_factor': x.user_defined['forward_factor']}
 for x in portfolio.closed_positions]
-"""
-
-current_trades = [{'id': x.instance_id, 'symbol': x.symbol, 'front_exp': x.front_option.expiration,
-                   'back_exp': x.back_option.expiration, 'gross_pnl': x.get_profit_loss(),
-                   'net_pnl': (x.get_profit_loss() - x.get_fees()),
-                   'pnl_pct':x.get_profit_loss_percent(), 'entry_date': x.get_open_datetime(),
-                   'exit_date': x.get_close_datetime(), 'days_in_trade': x.get_days_in_trade(),
-                   'open_spot_price': x.user_defined['spot_price'], 'close_spot_price': x.spot_price,
-                   'open_price': x.get_trade_price(),
-                   'close_price': x.price, 'front_opt_open_price': x.front_option.trade_open_info.price,
-                   'front_opt_open_bid': x.user_defined['front_bid'], 'front_opt_open_ask': x.user_defined['front_ask'],
-                   'front_opt_close_price': x.front_option.price, 'front_close_bid': x.front_option.bid,
-                   'front_close_ask': x.front_option.ask,'back_opt_open_price': x.back_option.trade_open_info.price,
-                   'back_opt_open_bid': x.user_defined['back_bid'], 'back_opt_open_ask': x.user_defined['back_ask'],
-                   'back_opt_close_price': x.back_option.price, 'back_close_bid': x.back_option.bid,
-                   'back_close_ask': x.back_option.ask, 'fees': x.get_fees(),
-                   'strike': x.front_option.strike, 'front_dte_at_open': x.user_defined['front_dte'],
-                   'back_dte_at_open': x.user_defined['back_dte'], 'open_premium': x.get_trade_premium(),
-                   'forward_factor': x.user_defined['forward_factor'],
-                   } for x in portfolio.closed_positions]
-"""
 
 df_trades = pd.DataFrame(trades)
 stats = trade_stats(df_trades)
 print(stats)
-fn = output_folder.joinpath(f'results_6.csv')
+fn = output_folder.joinpath(f'results_7.csv')
 df_trades.to_csv(fn, index=False)
-stats.to_csv(output_folder.joinpath('results_6_stats.csv'), index=True)
+stats.to_csv(output_folder.joinpath('results_7_stats.csv'), index=True)
 # ta = pa.Table.from_pandas(df_trades)
 # schema = ta.schema.remove_metadata()
 # ta = ta.replace_schema_metadata(schema.metadata)
