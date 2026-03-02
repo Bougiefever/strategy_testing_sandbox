@@ -26,8 +26,8 @@ df.sort_index(inplace=True)
 
 dts = df.index.normalize().unique().tolist()
 
-start_date = datetime.datetime(2022, 1, 2)
-end_date = datetime.datetime(2022, 12, 31)
+start_date = datetime.datetime(2020, 1, 2)
+end_date = datetime.datetime(2022, 12, 29)
 
 df = df.loc[start_date:end_date]
 price_drop = 0.01
