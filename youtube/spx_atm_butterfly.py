@@ -11,6 +11,7 @@ Years: All available (2016–2022)
 """
 
 import datetime
+import os
 from pathlib import Path
 from options_framework.config import settings
 from options_framework.option_types import OptionPositionType
@@ -31,6 +32,9 @@ df_vix.sort_index(inplace=True)
 df_vix.rename(columns={'close': 'vix'}, inplace=True)
 df = df_spx.merge(df_vix[['vix']], on='quote_datetime', how='left')
 df['vix'] = df['vix'].ffill()
+df_garch = pd.read_parquet(Path(os.getcwd(), 'spx_garch.parquet'), engine='pyarrow')
+garch_1pm = df_garch.between_time('13:00', '13:00')
+
 start_date = datetime.datetime(2016, 3, 9)
 end_date = datetime.datetime(2022, 11, 23)
 
@@ -136,6 +140,8 @@ for dt in dts:
                 filter_info.append({'date':dt, 'reason': f'vix at {vix}'})
                 break
 
+            garch = garch_1pm.loc[dtt]
+
             spot_price = df_dt.loc[dtt]['close']
             center_strike = min(strikes, key=lambda x: abs(x - spot_price))
             upper_strike = center_strike + wing1
@@ -143,7 +149,8 @@ for dt in dts:
 
             butterfly_1 = Butterfly.create(option_chain=option_chain, expiration=exp, option_type='put',
                                            center_strike=center_strike, upper_strike=upper_strike,
-                                           lower_strike=lower_strike, position_type=OptionPositionType.LONG)
+                                           lower_strike=lower_strike, position_type=OptionPositionType.LONG,
+                                           garch_return=garch['return'], garch_cond_var=garch['cond_var'])
 
             portfolio.open_position(butterfly_1, quantity=1, spread_width=wing1, vix=vix, orb_range=orb_range)
             prices = get_buttefly_prices(position=butterfly_1)
@@ -154,7 +161,8 @@ for dt in dts:
 
             butterfly_2 = Butterfly.create(option_chain=option_chain, expiration=exp, option_type='put',
                                            center_strike=center_strike, upper_strike=upper_strike,
-                                           lower_strike=lower_strike, position_type=OptionPositionType.LONG)
+                                           lower_strike=lower_strike, position_type=OptionPositionType.LONG,
+                                           garch_return=garch['return'], garch_cond_var=garch['cond_var'])
 
             portfolio.open_position(butterfly_2, quantity=1, spread_width=wing2, vix=vix, orb_range=orb_range)
             prices = get_buttefly_prices(position=butterfly_2)
@@ -180,11 +188,13 @@ trades = [{
         'center_strike': x.center_option.strike,
         'intrinsic_value': max(0, x.user_defined['spread_width'] - abs(x.spot_price - x.center_option.strike)),
         'vix': x.user_defined['vix'],
-        'first_15_min_range': x.user_defined['orb_range'],}
+        'first_15_min_range': x.user_defined['orb_range'],
+        'garch_return': x.user_defined['garch_return'],
+        'garch_cond_var': x.user_defined['garch_cond_var'],}
         for x in portfolio.closed_positions]
 
 df_trades = pd.DataFrame(trades)
-df_trades.to_csv(output_folder.joinpath("trades_3.csv"), index=False)
+df_trades.to_csv(output_folder.joinpath("trades_4.csv"), index=False)
 
 # all_records = []
 # for c in closed_positions:
