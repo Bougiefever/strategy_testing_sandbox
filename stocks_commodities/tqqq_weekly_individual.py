@@ -25,14 +25,14 @@ import os
 import pandas as pd
 import numpy as np
 
-qqq_fn = Path(r'D:\stock_data\daily\QQQ_.parquet')
+qqq_fn = Path(r'D:\stock_data\daily\QQQ.parquet')
 df_qqq = pd.read_parquet(qqq_fn, engine='pyarrow')
 df_qqq['200ma'] = talib.SMA(df_qqq['close'].to_numpy(float), timeperiod=200)
 df_qqq['yesterday_200_ma'] = df_qqq['200ma'].shift(1)
 df_qqq['return20d'] = df_qqq['close'].pct_change(20)
 df_qqq['yesterday_return20d'] = df_qqq['return20d'].shift(1)
 df_qqq.set_index('quote_datetime', inplace=True)
-vix_fn = Path(r'D:\stock_data\daily\VIX_.parquet')
+vix_fn = Path(r'D:\stock_data\daily\VIX.parquet')
 df_vix = pd.read_parquet(vix_fn, engine='pyarrow')
 df_vix.set_index('quote_datetime', inplace=True)
 

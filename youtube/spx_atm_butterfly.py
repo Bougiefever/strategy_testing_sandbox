@@ -196,32 +196,3 @@ trades = [{
 df_trades = pd.DataFrame(trades)
 df_trades.to_csv(output_folder.joinpath("trades_4.csv"), index=False)
 
-# all_records = []
-# for c in closed_positions:
-#     instance_id = c.instance_id
-#     spread_width = c.user_defined['spread_width']
-#     detailed_prices = c.user_defined['price_hist']
-#     history = c.get_price_history()
-#     records = []
-#     for i in range(len(history)):
-#         h = history[i]
-#         p = detailed_prices[i]
-#         rec = {
-#             'trade_id': instance_id,
-#             'spread_width': spread_width,
-#             'date':h[0].date(),
-#             'time': h[0].time(),
-#             'bid': p[1],
-#             'ask': p[2],
-#             'mid_price': p[3],
-#             'price': h[1],
-#             'spot_price': h[2],
-#             }
-#         records.append(rec)
-#     all_records.extend(records)
-#
-# df_history = pd.DataFrame(all_records)
-# df_history.to_csv(output_folder.joinpath("history_3.csv"), index=False)
-#
-# df_filters = pd.DataFrame(filter_info)
-# df_filters.to_csv(output_folder.joinpath("filter_3.csv"), index=False)

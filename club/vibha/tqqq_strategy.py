@@ -149,164 +149,6 @@ def calculate_tqqq_signals(df):
 
     return df
 
-@dataclass
-class Trade:
-    entry_date: str
-    entry_price: float
-    exit_date: Optional[str] = None
-    exit_price: Optional[float] = None
-    exit_reason: Optional[str] = None
-    shares: float = 0.0
-    pnl: float = 0.0
-    pnl_pct: float = 0.0
-    holding_days: int = 0
-    max_drawdown_pct: float = 0.0
-    peak_gain_pct: float = 0.0
-
-def print_report(trades, daily):
-    """Print comprehensive backtest results."""
-
-    if not trades:
-        print("No trades generated.")
-        return
-
-    print("=" * 70)
-    print("TQQQ SWING TRADING BACKTEST RESULTS")
-    print("Vibha Jha Strategy")
-    print("=" * 70)
-
-    # --- Portfolio summary ---
-    start_val = daily['portfolio_value'].iloc[0]
-    end_val = daily['portfolio_value'].iloc[-1]
-    total_return = (end_val - start_val) / start_val
-    start_date = str(daily.index[0])[:10]
-    end_date = str(daily.index[-1])[:10]
-    years = len(daily) / 252
-
-    # CAGR
-    cagr = (end_val / start_val) ** (1 / years) - 1 if years > 0 else 0
-
-    # Max drawdown on portfolio
-    running_max = daily['portfolio_value'].cummax()
-    drawdown = (daily['portfolio_value'] - running_max) / running_max
-    max_dd = drawdown.min()
-    max_dd_date = str(drawdown.idxmin())[:10]
-
-    # Time in market
-    days_in_trade = daily['in_trade'].sum()
-    pct_in_market = days_in_trade / len(daily)
-
-    print(f"\nPeriod:              {start_date} to {end_date} ({years:.1f} years)")
-    print(f"Starting capital:    ${start_val:,.0f}")
-    print(f"Ending capital:      ${end_val:,.0f}")
-    print(f"Total return:        {total_return:+.1%}")
-    print(f"CAGR:                {cagr:+.1%}")
-    print(f"Max drawdown:        {max_dd:.1%} (on {max_dd_date})")
-    print(f"Time in market:      {pct_in_market:.1%}")
-
-    # --- Buy & hold comparison ---
-    tqqq_start = daily['tqqq_close'].iloc[0]
-    tqqq_end = daily['tqqq_close'].iloc[-1]
-    bh_return = (tqqq_end - tqqq_start) / tqqq_start
-    bh_cagr = (tqqq_end / tqqq_start) ** (1 / years) - 1 if years > 0 else 0
-
-    print(f"\n--- Buy & Hold TQQQ Comparison ---")
-    print(f"TQQQ B&H return:     {bh_return:+.1%}")
-    print(f"TQQQ B&H CAGR:       {bh_cagr:+.1%}")
-
-    # --- Trade statistics ---
-    n_trades = len(trades)
-    # Exclude end_of_data trade from win/loss stats if still open
-    closed_trades = [t for t in trades if t.exit_reason != 'end_of_data']
-    n_closed = len(closed_trades)
-
-    winners = [t for t in closed_trades if t.pnl > 0]
-    losers = [t for t in closed_trades if t.pnl <= 0]
-    n_win = len(winners)
-    n_loss = len(losers)
-    win_rate = n_win / n_closed if n_closed > 0 else 0
-
-    avg_win = np.mean([t.pnl_pct for t in winners]) if winners else 0
-    avg_loss = np.mean([t.pnl_pct for t in losers]) if losers else 0
-    avg_hold_win = np.mean([t.holding_days for t in winners]) if winners else 0
-    avg_hold_loss = np.mean([t.holding_days for t in losers]) if losers else 0
-
-    largest_win = max([t.pnl_pct for t in winners]) if winners else 0
-    largest_loss = min([t.pnl_pct for t in losers]) if losers else 0
-
-    total_pnl = sum(t.pnl for t in closed_trades)
-    gross_wins = sum(t.pnl for t in winners) if winners else 0
-    gross_losses = sum(t.pnl for t in losers) if losers else 0
-    profit_factor = abs(gross_wins / gross_losses) if gross_losses != 0 else float('inf')
-
-    avg_peak = np.mean([t.peak_gain_pct for t in closed_trades]) if closed_trades else 0
-    avg_dd = np.mean([t.max_drawdown_pct for t in closed_trades]) if closed_trades else 0
-
-    print(f"\n--- Trade Statistics ({n_closed} closed trades) ---")
-    print(f"Total trades:        {n_trades} ({n_closed} closed, "
-          f"{'1 open' if n_trades > n_closed else '0 open'})")
-    print(f"Win rate:            {win_rate:.1%} ({n_win}W / {n_loss}L)")
-    print(f"Avg winner:          {avg_win:+.1%} (held {avg_hold_win:.0f} days)")
-    print(f"Avg loser:           {avg_loss:+.1%} (held {avg_hold_loss:.0f} days)")
-    print(f"Largest winner:      {largest_win:+.1%}")
-    print(f"Largest loser:       {largest_loss:+.1%}")
-    print(f"Profit factor:       {profit_factor:.2f}")
-    print(f"Avg peak gain:       {avg_peak:+.1%}")
-    print(f"Avg max drawdown:    {avg_dd:.1%}")
-    print(f"Total P&L:           ${total_pnl:+,.0f}")
-
-    # --- Exit reason breakdown ---
-    print(f"\n--- Exit Reasons ---")
-    reasons = {}
-    for t in closed_trades:
-        r = t.exit_reason
-        if r not in reasons:
-            reasons[r] = {'count': 0, 'total_pnl': 0.0}
-        reasons[r]['count'] += 1
-        reasons[r]['total_pnl'] += t.pnl
-    for reason, stats in sorted(reasons.items(), key=lambda x: -x[1]['count']):
-        print(f"  {reason:35s}  {stats['count']:3d} trades  ${stats['total_pnl']:+12,.0f}")
-
-    # --- Annual returns ---
-    print(f"\n--- Annual Returns ---")
-    daily_copy = daily.copy()
-    daily_copy.index = pd.to_datetime(daily_copy.index)
-    yearly = daily_copy['portfolio_value'].resample('YE').last()
-    yearly_start = daily_copy['portfolio_value'].resample('YS').first()
-    for end, start in zip(yearly.items(), yearly_start.items()):
-        year_return = (end[1] - start[1]) / start[1]
-        print(f"  {end[0].year}:  {year_return:+8.1%}    (${end[1]:>12,.0f})")
-
-    # --- Trade log ---
-    print(f"\n--- Trade Log ---")
-    print(f"{'Entry':>12s} {'Exit':>12s} {'Entry$':>10s} {'Exit$':>10s} "
-          f"{'Return':>8s} {'Days':>5s}  {'Reason'}")
-    print("-" * 85)
-    for t in trades:
-        print(f"{t.entry_date:>12s} {t.exit_date:>12s} "
-              f"${t.entry_price:>9.2f} ${t.exit_price:>9.2f} "
-              f"{t.pnl_pct:>+7.1%} {t.holding_days:>5d}  {t.exit_reason}")
-
-    print("=" * 70)
-
-
-def trades_to_dataframe(trades):
-    """Convert trade list to a DataFrame for further analysis."""
-    return pd.DataFrame([{
-        'entry_date': t.entry_date,
-        'exit_date': t.exit_date,
-        'entry_price': t.entry_price,
-        'exit_price': t.exit_price,
-        'pnl': t.pnl,
-        'pnl_pct': t.pnl_pct,
-        'holding_days': t.holding_days,
-        'max_drawdown_pct': t.max_drawdown_pct,
-        'peak_gain_pct': t.peak_gain_pct,
-        'exit_reason': t.exit_reason,
-        'shares': t.shares,
-    } for t in trades])
-
-
 df = calculate_tqqq_signals(df)
 
 dts = market_signals.index.intersection(df.index)
@@ -459,6 +301,13 @@ df_trades  = pd.DataFrame([{
         'shares': t.shares,
     } for t in trades])
 
-df_trades.to_csv(output_folder.joinpath('trades_1.csv'), index=False)
+df_trades['entry_date'] = pd.to_datetime(df_trades['entry_date'])
+df_trades['exit_date'] = pd.to_datetime(df_trades['exit_date'])
 
-pass
+trade_stats = trade_stats(df_trades)
+print(trade_stats)
+
+print_report(trades, daily)
+
+df_trades.to_csv(output_folder.joinpath('trades_1.csv'), index=False)
+trade_stats.to_csv(output_folder.joinpath('trade_stats_1.csv'), index=True)
