@@ -2,177 +2,8 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 import talib
-import math
+from helpers import *
 
-def print_report(trades, daily):
-    """Print comprehensive backtest results."""
-
-    if trades.empty:
-        print("No trades generated.")
-        return
-
-    print("=" * 70)
-    print("TQQQ SWING TRADING BACKTEST RESULTS")
-    print("Vibha Jha Strategy")
-    print("=" * 70)
-
-    # --- Portfolio summary ---
-    start_val = daily['portfolio_value'].iloc[0]
-    end_val = daily['portfolio_value'].iloc[-1]
-    total_return = (end_val - start_val) / start_val
-    start_date = str(daily.index[0])[:10]
-    end_date = str(daily.index[-1])[:10]
-    years = len(daily) / 252
-
-    # CAGR
-    cagr = (end_val / start_val) ** (1 / years) - 1 if years > 0 else 0
-
-    # Max drawdown on portfolio
-    running_max = daily['portfolio_value'].cummax()
-    drawdown = (daily['portfolio_value'] - running_max) / running_max
-    max_dd = drawdown.min()
-    max_dd_date = str(drawdown.idxmin())[:10]
-
-    # Time in market
-    days_in_trade = daily['in_trade'].sum()
-    pct_in_market = days_in_trade / len(daily)
-
-    # Calculate daily returns from portfolio value
-    daily_returns = daily['portfolio_value'].pct_change().dropna()
-    invested_returns = daily_returns[daily['in_trade']]
-    trading_days = 252
-    risk_free_rate = 0.04
-
-    # Daily risk-free rate
-    rf_daily = (1 + risk_free_rate) ** (1 / trading_days) - 1
-    excess_returns = daily_returns - rf_daily
-    invested_excess_returns = invested_returns - rf_daily
-
-    # SHARPE RATIO
-    sharpe = (excess_returns.mean() / excess_returns.std()) * np.sqrt(trading_days)
-    sharpe_invested = (invested_returns.mean() / invested_returns.std()) * np.sqrt(trading_days)
-
-    # SORTINO RATIO (only penalizes downside volatility)
-    downside_returns = excess_returns[excess_returns < 0]
-    downside_std = np.sqrt((downside_returns ** 2).mean())
-    invested_downside_returns = invested_excess_returns[invested_excess_returns < 0]
-    invested_downside_std = np.sqrt((np.minimum(invested_excess_returns, 0) ** 2).mean())
-    sortino = (excess_returns.mean() / downside_std) * np.sqrt(trading_days)
-    sortino_invested = (invested_excess_returns.mean() / invested_downside_std) * np.sqrt(trading_days)
-
-    # CALMAR RATIO (CAGR / max drawdown)
-    calmar = abs(cagr / max_dd) if max_dd != 0 else float('inf')
-
-    # OMEGA RATIO (probability-weighted gains over losses vs threshold)
-    threshold_daily = rf_daily
-    gains = excess_returns[excess_returns > 0].sum()
-    losses = abs(excess_returns[excess_returns < 0].sum())
-    omega = gains / losses if losses != 0 else float('inf')
-
-    invested_gains = invested_excess_returns[invested_excess_returns > 0].sum()
-    invested_losses = abs(invested_excess_returns[invested_excess_returns < 0].sum())
-    omega_invested = invested_gains / invested_losses
-
-    print(f"\nPeriod:              {start_date} to {end_date} ({years:.1f} years)")
-    print(f"Starting capital:    ${start_val:,.0f}")
-    print(f"Ending capital:      ${end_val:,.0f}")
-    print(f"Total return:        {total_return:+.1%}")
-    print(f"CAGR:                {cagr:+.1%}")
-    print(f"Sharpe ratio:        {sharpe:.2f}")
-    print(f"Sortino ratio:       {sortino:.2f}")
-    print(f"Calmar ratio:        {calmar:.2f}")
-    print(f"Omega ratio:         {omega:.2f}")
-    print(f"Sharpe Invested:     {sharpe_invested:.2f}")
-    print(f"Sortino Invested:    {sortino_invested:.2f}")
-    print(f"Omega Invested:      {omega_invested:.2f}")
-    print(f"Max drawdown:        {max_dd:.1%} (on {max_dd_date})")
-    print(f"Time in market:      {pct_in_market:.1%}")
-
-    # --- Buy & hold comparison ---
-    tqqq_start = daily['tqqq_close'].iloc[0]
-    tqqq_end = daily['tqqq_close'].iloc[-1]
-    bh_return = (tqqq_end - tqqq_start) / tqqq_start
-    bh_cagr = (tqqq_end / tqqq_start) ** (1 / years) - 1 if years > 0 else 0
-
-    print(f"\n--- Buy & Hold TQQQ Comparison ---")
-    print(f"TQQQ B&H return:     {bh_return:+.1%}")
-    print(f"TQQQ B&H CAGR:       {bh_cagr:+.1%}")
-
-    # --- Trade statistics ---
-    trades_ = trades.to_dict('records')
-    n_trades = len(trades)
-    # Exclude end_of_data trade from win/loss stats if still open
-    closed_trades = [t for t in trades_ if t['exit_reason'] != 'end_of_data']
-    n_closed = len(closed_trades)
-
-    winners = [t for t in closed_trades if t['pnl'] > 0]
-    losers = [t for t in closed_trades if t['pnl'] <= 0]
-    n_win = len(winners)
-    n_loss = len(losers)
-    win_rate = n_win / n_closed if n_closed > 0 else 0
-
-    avg_win = np.mean([t['pnl_pct'] for t in winners]) if winners else 0
-    avg_loss = np.mean([t['pnl_pct'] for t in losers]) if losers else 0
-    avg_hold_win = np.mean([t['days_in_trade'] for t in winners]) if winners else 0
-    avg_hold_loss = np.mean([t['days_in_trade'] for t in losers]) if losers else 0
-
-    largest_win = max([t['pnl_pct'] for t in winners]) if winners else 0
-    largest_loss = min([t['pnl_pct'] for t in losers]) if losers else 0
-
-    total_pnl = sum(t['pnl'] for t in closed_trades)
-    gross_wins = sum(t['pnl'] for t in winners) if winners else 0
-    gross_losses = sum(t['pnl'] for t in losers) if losers else 0
-    profit_factor = abs(gross_wins / gross_losses) if gross_losses != 0 else float('inf')
-
-    avg_peak = np.mean([t['peak_gain_pct'] for t in closed_trades]) if closed_trades else 0
-    avg_dd = np.mean([t['max_drawdown_pct'] for t in closed_trades]) if closed_trades else 0
-
-    print(f"\n--- Trade Statistics ({n_closed} closed trades) ---")
-    print(f"Total trades:        {n_trades} ({n_closed} closed, "
-          f"{'1 open' if n_trades > n_closed else '0 open'})")
-    print(f"Win rate:            {win_rate:.1%} ({n_win}W / {n_loss}L)")
-    print(f"Avg winner:          {avg_win:+.1%} (held {avg_hold_win:.0f} days)")
-    print(f"Avg loser:           {avg_loss:+.1%} (held {avg_hold_loss:.0f} days)")
-    print(f"Largest winner:      {largest_win:+.1%}")
-    print(f"Largest loser:       {largest_loss:+.1%}")
-    print(f"Profit factor:       {profit_factor:.2f}")
-    print(f"Avg peak gain:       {avg_peak:+.1%}")
-    print(f"Avg max drawdown:    {avg_dd:.1%}")
-    print(f"Total P&L:           ${total_pnl:+,.0f}")
-
-    # --- Exit reason breakdown ---
-    print(f"\n--- Exit Reasons ---")
-    reasons = {}
-    for t in closed_trades:
-        r = t['exit_reason']
-        if r not in reasons:
-            reasons[r] = {'count': 0, 'total_pnl': 0.0}
-        reasons[r]['count'] += 1
-        reasons[r]['total_pnl'] += t['pnl']
-    for reason, stats in sorted(reasons.items(), key=lambda x: -x[1]['count']):
-        print(f"  {reason:35s}  {stats['count']:3d} trades  ${stats['total_pnl']:+12,.0f}")
-
-    # --- Annual returns ---
-    print(f"\n--- Annual Returns ---")
-    daily_copy = daily.copy()
-    daily_copy.index = pd.to_datetime(daily_copy.index)
-    yearly = daily_copy['portfolio_value'].resample('YE').last()
-    yearly_start = daily_copy['portfolio_value'].resample('YS').first()
-    for end, start in zip(yearly.items(), yearly_start.items()):
-        year_return = (end[1] - start[1]) / start[1]
-        print(f"  {end[0].year}:  {year_return:+8.1%}    (${end[1]:>12,.0f})")
-
-    # --- Trade log ---
-    print(f"\n--- Trade Log ---")
-    print(f"{'Entry':>12s} {'Exit':>12s} {'Entry$':>10s} {'Exit$':>10s} "
-          f"{'Return':>8s} {'Days':>5s}  {'Reason'}")
-    print("-" * 85)
-    for t in trades_:
-        print(f"{t['entry_date']:>12s} {t['exit_date']:>12s} "
-              f"${t['entry_price']:>9.2f} ${t['exit_price']:>9.2f} "
-              f"{t['pnl_pct']:>+7.1%} {t['days_in_trade']:>5d}  {t['exit_reason']}")
-
-    print("=" * 70)
 
 """
 =====================================================
@@ -564,10 +395,11 @@ def perform_trades(df, df_state, df_signals):
         elif current_trade is not None and not pending_exit:
             exit_reason = df_state.loc[dt, 'exit_reason']
             signal_score = df_signals.loc[dt, 'signal_score']
+            signal_count = df_signals.loc[dt, 'sell_signal_count']
             if exit_reason == 'FTD_LOW' or exit_reason == 'DDAY_COUNT':
                 pending_exit = True
                 pending_exit_reason = exit_reason
-            elif signal_score >= 4.0:
+            elif signal_count >= 2:
                 pending_exit = True
                 pending_exit_reason = f'SCORE {signal_score:.1f}'
                 current_trade['signal_score'] = signal_score
@@ -605,7 +437,7 @@ if __name__ == "__main__":
     daily_record, trades = perform_trades(df_tqqq, df_state, df_sell_signals)
     df_daily = pd.DataFrame(daily_record)
     df_trades = pd.DataFrame(trades)
-    print_report(df_trades, df_daily)
+    print_report(df_trades, df_daily, strategy="Vibha Jha Strategy")
     pass
     
 
