@@ -22,8 +22,8 @@ def my_position_expired(position):
 options_root = Path(r'D:\options_data\daily')
 output_folder = Path(r'D:\test_data\spx_ic\spx1dte')
 
-start_date = datetime.datetime(2019, 1, 1)
-end_date = datetime.datetime(2019, 12, 31)
+start_date = datetime.datetime(2016, 1, 1)
+end_date = datetime.datetime(2022, 12, 31)
 
 starting_cash = 100_000
 wing = 60
@@ -83,6 +83,8 @@ if __name__ == "__main__":
             if dtt.time() == entry_time1 or dtt.time() == entry_time2:
                 option_chain = portfolio.option_chains[ticker]
                 expirations = option_chain.expirations
+                if len(expirations) == 0:
+                    continue
                 exp = min(expirations, key=lambda x: abs((x - dt.date()).days - target_dte))
                 dt_diff = (exp - dt.date()).days
                 if dt_diff != target_dte:
@@ -111,6 +113,8 @@ if __name__ == "__main__":
 
         option_chain = portfolio.option_chains[ticker]
         options = option_chain.options
+        if len(options) == 0:
+            continue
         spot_price = options[0]['spot_price']
         in_trade = len(portfolio.positions) > 0
         daily_record = {
@@ -158,10 +162,10 @@ if __name__ == "__main__":
 
     p_stats, t_stats = print_report(ticker, df_trades, df_daily, strategy='SPX 1DTE Butterfly')
 
-    df_trades.to_csv(output_folder.joinpath('trades_1.csv'), index=False)
-    df_daily.to_csv(output_folder.joinpath('daily_record_1.csv'), index=False)
-    p_stats.to_csv(output_folder.joinpath('port_stats_1.csv'), index=True)
-    t_stats.to_csv(output_folder.joinpath('trade_stats_1.csv'), index=True)
+    df_trades.to_csv(output_folder.joinpath('trades_2.csv'), index=False)
+    df_daily.to_csv(output_folder.joinpath('daily_record_2.csv'), index=False)
+    p_stats.to_csv(output_folder.joinpath('port_stats_2.csv'), index=True)
+    t_stats.to_csv(output_folder.joinpath('trade_stats_2.csv'), index=True)
 
 
 

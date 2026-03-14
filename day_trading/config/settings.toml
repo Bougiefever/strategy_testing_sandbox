@@ -1,0 +1,26 @@
+standard_fee=0.65
+incur_fees=true
+slippage=0.05
+apply_slippage=true
+fill_factor=0.5 # 0 = no slippage 1.0 = 0 = bid or ask, percentage is percentage between
+
+options_directory =  "D:\\options_data"
+data_frequency = 'intraday'
+minute_granularity = 1
+start_time = '09_30'
+end_time = '16_00'
+exclude_shortdays = false
+
+# exclude all economic days. includes witching, fomc, ppi an cpi
+exclude_economic = false
+
+# if you only want to exclude some economic days, select them individually
+# these settings are ignored if "exclude economic" is true because they are all excluded with that setting
+exclude_witching = false
+exclude_fomc = false
+exclude_ppi = false
+exclude_cpi = false
+
+stock_daily_files = "D:\\stock_data\\daily_stock_prices"
+stock_intra_files = "D:\\stock_data\\intraday"
+options_intra_files = "D:\\options_data\\intraday"

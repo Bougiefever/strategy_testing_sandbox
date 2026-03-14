@@ -339,9 +339,9 @@ stats = trade_stats(df_trades)
 print(stats)
 
 output_folder = Path(r'D:\test_data\spx_ic')
-fn = output_folder.joinpath('trades_4.csv')
+fn = output_folder.joinpath('trades_5.csv')
 df_trades.to_csv(fn, index=False)
-stats.to_csv(output_folder.joinpath('stats_4.csv'), index=True)
+stats.to_csv(output_folder.joinpath('stats_5.csv'), index=True)
 
 
 
