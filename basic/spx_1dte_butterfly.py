@@ -6,6 +6,8 @@ import numpy as np
 import datetime
 from pathlib import Path
 from utility import *
+import itertools
+import csv
 
 from options_framework.option_types import OptionPositionType
 from options_framework.utils.helpers import get_market_dates
@@ -22,8 +24,34 @@ def my_position_expired(position):
 options_root = Path(r'D:\options_data\daily')
 output_folder = Path(r'D:\test_data\spx_ic\spx1dte')
 
-start_date = datetime.datetime(2016, 1, 1)
-end_date = datetime.datetime(2022, 12, 31)
+file_number = 4
+trades_fn = output_folder.joinpath(f'trades_{file_number}.csv')
+trades_headers = ['id','symbol','option_type','entry_date','exit_date','open_premium','expiration','open_spot_price',
+'close_spot_price','entry_price','exit_price','pnl','pnl_pct','qty','fees','center_strike','upper_strike',
+'lower_strike','intrinsic_value','exit_reason','holding_period','peak_gain_pct','max_drawdown_pct','entry_type']
+trades_file = open(trades_fn, 'a', newline='')
+trades_writer = csv.writer(trades_file)
+if not trades_fn.exists():
+    trades_writer.writerow(trades_headers)
+
+daily_record_fn = output_folder.joinpath(f'daily_record_{file_number}.csv')
+daily_record_headers = ['date','close','portfolio_value','in_trade']
+daily_record_file = open(daily_record_fn, 'a', newline='')
+daily_writer = csv.writer(daily_record_file)
+if not daily_record_fn.exists():
+    daily_writer.writerow(daily_record_headers)
+
+options_fn = output_folder.joinpath(f'options_{file_number}.csv')
+options_headers = ['parent_id','instance_id','symbol','option_type','quantity','entry_date','exit_date','strike',
+        'open_price','open_spot_price','close_price','close_spot_price','pnl','expiration','bid_open','ask_open',
+        'mid_open','mid_close','bid_close','ask_close']
+option_file = open(options_fn, 'a', newline='')
+option_writer = csv.writer(option_file)
+if not options_fn.exists():
+    option_writer.writerow(options_headers)
+
+start_date = datetime.datetime(2022, 3, 9)
+end_date = datetime.datetime(2022, 3, 22)
 
 starting_cash = 100_000
 wing = 60
@@ -51,6 +79,8 @@ def get_day_times(dt: datetime.datetime, granularity: int) -> list[datetime.date
         tm = new_dt.time()
     return today
 
+trades = []
+options = []
 if __name__ == "__main__":
     daily_records = []
     for dt in dts:
@@ -79,6 +109,60 @@ if __name__ == "__main__":
                     portfolio.close_position(p, exit_reason=exit_reason, holding_period=holding_period,
                                              peak_gain_pct=peak_gain_pct, max_drawdown_pct=max_drawdown_pct)
                     print(dt, p, exit_reason, pnl)
+                    trade = {
+                        'id': p.instance_id,
+                        'symbol': p.symbol,
+                        'option_type': p.option_type,
+                        'entry_date': p.get_open_datetime(),
+                        'exit_date': p.get_close_datetime(),
+                        'open_premium': p.get_trade_premium(),
+                        'expiration': p.expiration,
+                        'open_spot_price': p.lower_option.trade_open_info.spot_price,
+                        'close_spot_price': p.spot_price,
+                        'entry_price': p.get_trade_price(),
+                        'exit_price': p.get_closed_price(),
+                        'pnl': p.get_profit_loss(),
+                        'pnl_pct': p.get_profit_loss_percent(),
+                        'qty': p.lower_option.trade_open_info.quantity,
+                        'fees': p.get_fees(),
+                        'center_strike': p.center_option.strike,
+                        'upper_strike': p.upper_option.strike,
+                        'lower_strike': p.lower_option.strike,
+                        'intrinsic_value': max(0, p.user_defined['spread_width'] - abs(p.spot_price - p.center_option.strike)),
+                        'exit_reason': p.user_defined['exit_reason'],
+                        'holding_period': (p.get_close_datetime() - p.get_open_datetime()).seconds / 86400.0,
+                        'peak_gain_pct': p.user_defined['peak_gain_pct'],
+                        'max_drawdown_pct': p.user_defined['max_drawdown_pct'],
+                        'entry_type': p.user_defined['entry_type']
+                    }
+                    trades.append(trade)
+                    trades_writer.writerow(list(trade.values()))
+                    options = [{
+                        'parent_id': x.user_defined['parent_id'],
+                        'instance_id': x.instance_id,
+                        'symbol': x.symbol,
+                        'option_type': x.option_type,
+                        'quantity': x.quantity,
+                        'entry_date': x.trade_open_info.date,
+                        'exit_date': x.trade_close_info.date,
+                        'strike': x.strike,
+                        'open_price': x.trade_open_info.price,
+                        'o_price'
+                        'open_spot_price': x.trade_open_info.spot_price,
+                        'close_price': x.trade_close_info.price,
+                        'close_spot_price': x.trade_close_info.spot_price,
+                        'pnl': x.trade_close_info.profit_loss,
+                        'expiration': x.expiration,
+                        'bid_open': x.user_defined['bid_open'],
+                        'ask_open': x.user_defined['ask_open'],
+                        'mid_open': x.user_defined['mid_open'],
+                        'mid_close': x.user_defined['mid_close'],
+                        'bid_close': x.user_defined['bid_close'],
+                        'ask_close': x.user_defined['ask_close'],
+                            }
+                                for x in p.options]
+                    option_writer.writerows([list(x.values()) for x in options])
+
 
             if dtt.time() == entry_time1 or dtt.time() == entry_time2:
                 option_chain = portfolio.option_chains[ticker]
@@ -123,7 +207,11 @@ if __name__ == "__main__":
             'portfolio_value': portfolio.current_value,
             'in_trade': in_trade,
         }
+        daily_writer.writerow(list(daily_record.values()))
         daily_records.append(daily_record)
+        trades_file.flush()
+        option_file.flush()
+        daily_record_file.flush()
 
     open_positions = portfolio.positions.copy()
     for p in open_positions:
@@ -150,22 +238,55 @@ if __name__ == "__main__":
         'lower_strike': x.lower_option.strike,
         'intrinsic_value': max(0, x.user_defined['spread_width'] - abs(x.spot_price - x.center_option.strike)),
         'exit_reason': x.user_defined['exit_reason'],
-        'holding_period': x.user_defined['holding_period'],
+        'holding_period': (x.get_close_datetime() - x.get_open_datetime()).seconds / 86400.0,
         'peak_gain_pct': x.user_defined['peak_gain_pct'],
         'max_drawdown_pct': x.user_defined['max_drawdown_pct'],
         'entry_type': x.user_defined['entry_type'],}
-        for x in portfolio.closed_positions]
+        for x in open_positions]
+
+    all_options = [x.options for x in portfolio.closed_positions]
+    options = list(itertools.chain.from_iterable(all_options))
+
+    option_dicts = [{
+        'parent_id': x.user_defined['parent_id'],
+        'instance_id': x.instance_id,
+        'symbol': x.symbol,
+        'option_type': x.option_type,
+        'quantity': x.quantity,
+        'entry_date': x.trade_open_info.date,
+        'exit_date': x.trade_close_info.date,
+        'strike': x.strike,
+        'open_price': x.trade_open_info.price,
+        'o_price'
+        'open_spot_price': x.trade_open_info.spot_price,
+        'close_price': x.trade_close_info.price,
+        'close_spot_price': x.trade_close_info.spot_price,
+        'pnl': x.trade_close_info.profit_loss,
+        'expiration': x.expiration,
+        'bid_open': x.user_defined['bid_open'],
+        'ask_open': x.user_defined['ask_open'],
+        'mid_open': x.user_defined['mid_open'],
+        'mid_close': x.user_defined['mid_close'],
+        'bid_close': x.user_defined['bid_close'],
+        'ask_close': x.user_defined['ask_close'],
+    }
+        for x in options]
+
+    df_options = pd.DataFrame(option_dicts)
 
     df_trades = pd.DataFrame(trades)
     df_daily = pd.DataFrame(daily_records)
     df_daily.set_index('date', inplace=True)
 
+    trade_stats = trade_stats(df_trades)
+    print(trade_stats)
+    df_trades['holding_period'] = df_trades['holding_period'].apply(lambda x: int(np.ceil(x)))
     p_stats, t_stats = print_report(ticker, df_trades, df_daily, strategy='SPX 1DTE Butterfly')
 
-    df_trades.to_csv(output_folder.joinpath('trades_2.csv'), index=False)
-    df_daily.to_csv(output_folder.joinpath('daily_record_2.csv'), index=False)
-    p_stats.to_csv(output_folder.joinpath('port_stats_2.csv'), index=True)
-    t_stats.to_csv(output_folder.joinpath('trade_stats_2.csv'), index=True)
+
+    p_stats.to_csv(output_folder.joinpath(f'port_stats_{file_number}.csv'), index=True)
+    t_stats.to_csv(output_folder.joinpath(f'trade_stats_{file_number}.csv'), index=True)
 
 
+    print('done')
 

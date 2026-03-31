@@ -65,6 +65,7 @@ def trade_stats(trades: pd.DataFrame) -> pd.Series:
         t["net_pnl"] = t["pnl"] - t.get("fees", 0.0)
 
     t["duration_days"] = (t["exit_date"] - t["entry_date"]).dt.total_seconds() / 86400.0
+    t["duration_minutes"] = (t["exit_date"] - t["entry_date"]).dt.total_seconds() / 60.0
 
     wins = t[t["net_pnl"] > 0]
     losses = t[t["net_pnl"] < 0]
@@ -86,6 +87,8 @@ def trade_stats(trades: pd.DataFrame) -> pd.Series:
         "Avg Losing Trade [$]": float(losses["net_pnl"].mean()) if len(losses) else np.nan,
         "Avg Winning Duration [days]": float(wins["duration_days"].mean()) if len(wins) else np.nan,
         "Avg Losing Duration [days]": float(losses["duration_days"].mean()) if len(losses) else np.nan,
+        "Avg Winning Duration [minutes]": float(wins["duration_days"].mean()) if len(wins) else np.nan,
+        "Avg Losing Duration [minutes]": float(losses["duration_days"].mean()) if len(losses) else np.nan,
         "Total Fees Paid": float(t.get("fees", 0.0).sum()) if "fees" in t.columns else 0.0,
     }
     return pd.Series(out)

@@ -1,10 +1,8 @@
 standard_fee=0.50
 incur_fees=true
-slippage=0.05
-apply_slippage=true
-fill_factor=0.0
-exclude_shortdays = true
-exclude_economic = true
+fill_factor=1
+exclude_shortdays = false
+exclude_economic = false
 minute_granularity = 1
 start_time = '09_30'
 end_time = '16_00'
