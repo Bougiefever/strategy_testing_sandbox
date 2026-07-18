@@ -1,3 +1,15 @@
+"""
+Gold -
+
+30 min EMA - above: sell ATM put  sell $1 OTM call
+             below: sell ATM call sell $1 OTM put
+
+Enter 15 min after market open
+Exit 15 min before market close
+
+0 DTE
+
+"""
 import datetime
 from pathlib import Path
 import pandas as pd
@@ -5,100 +17,90 @@ import numpy as np
 from matplotlib import pyplot as plt
 from options_framework.portfolio import OptionPortfolio
 from options_framework.spreads.strangle import Strangle
+from options_framework.config import settings
+from options_framework.utils.helpers import get_market_dates
 import talib
 
-options_root = Path(r'D:\options_data\daily')
-stock_data_folder = Path(r'D:\stock_data\intraday\market\etfs')
+options_root = Path(r'D:\options_data\intraday')
+stock_data_folder = Path(r'E:\_data\thetadata\stock_data\data')
 
 gld_stock_data = stock_data_folder.joinpath('GLD.parquet')
 starting_cash = 100_000
 risk_per_position = 0.50
-start_date = datetime.datetime(2015, 1, 1)
-end_date = datetime.datetime(2025, 1, 3)
+start_date = datetime.datetime(2022, 1, 1)
+end_date = datetime.datetime(2026, 3, 31)
+enter_time = datetime.time(9,45)
+exit_time = datetime.time(15,45)
 profit_target = 0.5
 
+settings['data_frequency'] = "intraday"
+settings['minute_granularity'] = 1
 portfolio = OptionPortfolio(cash=starting_cash, start_date=start_date, end_date=end_date)
 df = pd.read_parquet(gld_stock_data, engine='pyarrow')
 df.set_index('quote_datetime', inplace=True)
-df = df[(df.index >= start_date) & (df.index <= end_date)]
 df['ema'] = talib.EMA(df['close'], timeperiod=30)
+df = df[(df.index >= start_date) & (df.index <= end_date)]
+
 
 ticker = 'GLD'
 spread_width = 2
 
 if __name__ == '__main__':
-    dts = df.index.normalize().unique().tolist()
+    dts = [x.date() for x in get_market_dates(start_date, end_date)]  #df.index.normalize().unique().tolist()
 
     for dt in dts:
-        #print(dt) # dt.to_pydatetime() == datetime.datetime(2020, 3, 9)
-        df_dt = df[df.index.normalize() == dt]
-
-        # make sure this is a normal day - not a half day
-        last_dt = df_dt.iloc[-1].name
-        if last_dt.hour != 15:
+        print(dt) # dt.to_pydatetime() == datetime.datetime(2020, 3, 9)
+        df_dt = df[df.index.normalize() == pd.to_datetime(dt)]
+        if df_dt.empty:
             continue
 
-        for tm, row in df_dt.iterrows():
-            tm = tm.to_pydatetime()
-            ema_tm = row['ema']
-            portfolio.next(tm, ticker)
-            if np.isnan(ema_tm):
-                continue
-            if tm.time() >= datetime.time(9, 45) and (len(portfolio.positions) == 0):
+        entry_tm = pd.Timestamp(f"{dt} {enter_time}")
+        exit_tm = pd.Timestamp(f"{dt} {exit_time}")
 
-                option_chain = portfolio.option_chains[ticker]
-                if len(option_chain.options) == 0:
-                    continue
-                expiration = option_chain.expirations[0]
+        # open option at 9:45
+        row = df.loc[entry_tm]
+        close = row['close']
+        ema = row['ema']
+        portfolio.next(entry_tm.to_pydatetime(), ticker)
+        option_chain = portfolio.option_chains[ticker]
+        options = option_chain.options
+        if len(options) == 0:
+            continue
 
-                # only want to trade 0-dte options
-                if expiration != dt.date():
-                    break
+        # only trade on 0DTE days
+        expiration = option_chain.expirations[0]
+        if dt != expiration:
+            continue
 
+        strikes = option_chain.expiration_strikes[expiration]
 
-                spot_price = row['close']
+        atm_strike = min(strikes, key=lambda x: abs(x - close))
 
-                # if stock price is above ema, sell atm put and $1 otm call
-                # if stock price is below ema, sell atm call and $1 otm put
-                strikes = option_chain.expiration_strikes[expiration] # get all the strikes available for this expiration
-                atm_strike = min(strikes, key=lambda x: abs(x - spot_price)) # find closest to atm strike
+        if close >= ema:
+            put_strike = atm_strike
+            call_strike = min(strikes, key=lambda x: abs(x - (atm_strike + spread_width)))
 
-                if spot_price > ema_tm:
-                    put_strike = atm_strike
-                    call_strike = min(strikes, key=lambda x: abs(x - (atm_strike + spread_width)))
-                else:
-                    call_strike = atm_strike
-                    put_strike = min(strikes, key=lambda x: abs(x - (atm_strike - spread_width)))
+        if close < ema:
+            call_strike = atm_strike
+            put_strike = min(strikes, key=lambda x: abs(x - (atm_strike - spread_width)))
 
-                try:
-                    strangle = Strangle.create(option_chain=option_chain,
+        try:
+            strangle = Strangle.create(option_chain=option_chain,
                                                expiration=expiration,
                                                call_strike=call_strike,
                                                put_strike=put_strike)
-                    margin = strangle.get_required_margin(-1)
-                    allowed_risk = portfolio.cash * risk_per_position
-                    quantity = int(allowed_risk // margin * -1)
-                    portfolio.open_position(strangle, quantity=quantity)
-                    continue
-                except Exception as e:
-                    #print(f'{tm}: cannot open position', e)
-                    continue
+            margin = strangle.get_required_margin(-1)
+            allowed_risk = portfolio.cash * risk_per_position
+            quantity = int(allowed_risk // margin * -1)
+            portfolio.open_position(strangle, quantity=quantity)
+        except Exception as e:
+            print(f'{tm}: cannot open position', e)
+            continue
 
-            if tm.time() > datetime.time(9, 45) and (len(portfolio.positions) == 1):
-
-                open_strangle = portfolio.positions[0]
-                quantity = open_strangle.quantity
-                premium = open_strangle.get_trade_premium()
-                pnl = open_strangle.get_profit_loss()
-                pnl_pct = open_strangle.get_profit_loss_percent()
-
-                if pnl <= premium * 2 or pnl_pct >= 0.5 or tm.time() >= datetime.time(15,45):
-                    portfolio.close_position(open_strangle.instance_id)
-                    call_pnl = open_strangle.call.trade_close_info.profit_loss
-                    put_pnl = open_strangle.put.trade_close_info.profit_loss
-                    fees = open_strangle.get_fees()
-                    print(f'{open_strangle.instance_id}, {dt}, {portfolio.current_value:.2f}, {quantity}, {open_strangle.get_profit_loss():.2f}, {call_pnl:.2f}, {put_pnl:.2f}, {fees:.2f}')
-                    break
+        # Exit at 15 min before market close
+        portfolio.next(exit_tm.to_pydatetime(), ticker)
+        portfolio.close_position(strangle)
+        pass
 
     print(portfolio.current_value)
     #print(portfolio.close_values)

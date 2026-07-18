@@ -1,0 +1,12 @@
+standard_fee=0.65
+incur_fees=true
+fill_factor=0.5 #  1.0 = mid price, 0 = bid or ask, percentage is percentage between bid/ask and mid
+
+options_directory =  "D:\\options_data"
+data_frequency = 'daily'
+
+exclude_shortdays = false
+exclude_witching = false
+exclude_fomc = false
+exclude_ppi = false
+exclude_cpi = false

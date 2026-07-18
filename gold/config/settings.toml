@@ -1,8 +1,13 @@
 standard_fee=0.50
 incur_fees=true
-slippage=0.05
-apply_slippage=true
+fill_factor = 1.0
 
 options_directory =  "D:\\options_data"
 data_frequency = 'daily'
 stock_data_files = "D:\\stock_data\\intraday\\market\\etfs"
+
+minute_granularity = 1
+start_time = '09_30'
+end_time = '16_00'
+exclude_shortdays = true
+exclude_economic = true

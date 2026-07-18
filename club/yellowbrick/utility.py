@@ -1,157 +1,131 @@
 import pandas as pd
 import numpy as np
 
-def _align_series(nlv, cash=None, margin=None):
-    nlv = nlv.sort_index().astype(float).dropna()
-    idx = nlv.index
-    out = {"nlv": nlv}
-    if cash is not None:
-        out["cash"] = cash.sort_index().reindex(idx).ffill().astype(float)
-    if margin is not None:
-        out["margin"] = margin.sort_index().reindex(idx).ffill().astype(float)
-    return out
+def market_state(df: pd.DataFrame):
+    in_uptrend = False
+    ftd_low = np.nan
+    rally_active = False
+    rally_count = 0
+    rally_low = np.inf
+    active_ddays = []
 
-def max_drawdown_stats(equity: pd.Series):
-    peak = equity.cummax()
-    dd = equity / peak - 1.0
-    max_dd = float(dd.min())  # negative
+    # constants
+    ftd_min_gain = 0.01
+    ftd_min_day = 4
+    dd_threshold = -0.002
+    decay_window = 25
+    rally_pct = 0.06
+    dday_exit = 5
+    max_high_window = 25
+    stall_pct_gain = 0.004
 
-    underwater = dd < 0
-    grp = (underwater != underwater.shift(1)).cumsum()
-    run_lengths = underwater.groupby(grp).sum()
-    max_dd_dur = int(run_lengths.max()) if len(run_lengths) else 0
-    return dd, max_dd, max_dd_dur
+    df = df.copy()
+    dts = df.index.tolist()
 
-def cagr_from_equity(equity: pd.Series):
-    equity = equity.dropna()
-    years = (equity.index[-1] - equity.index[0]).days / 365.25
-    if years <= 0:
-        return np.nan
-    return float((equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1)
+    df['pct_change'] = df['close'].pct_change()
+    df['rolling_high'] = df['high'].rolling(window=max_high_window).max()
 
-def sharpe_sortino(daily_rets: pd.Series, ann_factor=252, rf_daily=0.0):
-    r = daily_rets.dropna()
-    ex = r - rf_daily
-    mu = ex.mean()
-    sigma = ex.std(ddof=0)
-    sharpe = np.nan if sigma == 0 else float(mu / sigma * np.sqrt(ann_factor))
+    # state variables for trading
+    df['ftd_low'] = np.nan
+    df['in_uptrend'] = False
+    df['dday_count'] = 0
 
-    downside = ex[ex < 0]
-    d_sigma = downside.std(ddof=0)
-    sortino = np.nan if d_sigma == 0 else float(mu / d_sigma * np.sqrt(ann_factor))
-    return sharpe, sortino
+    for dt in dts:
+        i = df.index.get_loc(dt)
+        today = df.loc[dt]
+        yesterday = df.iloc[i - 1]
+        two_days_ago = df.iloc[i - 2]
+        ftd_day = False
 
-def omega_ratio(daily_rets: pd.Series, threshold=0.0):
-    r = daily_rets.dropna()
-    gains = (r - threshold).clip(lower=0).sum()
-    losses = (threshold - r).clip(lower=0).sum()
-    return np.nan if losses == 0 else float(gains / losses)
+        if in_uptrend:
+            # add new distribution days if index drops dd_threshold on higher volume
+            if today['pct_change'] <= dd_threshold and today['volume'] > yesterday['volume']:
+                active_ddays.append((i, today['close']))
 
-def position_coverage(trades: pd.DataFrame, index: pd.DatetimeIndex) -> float:
-    in_pos = pd.Series(False, index=index)
-    for _, r in trades.iterrows():
-        start = pd.to_datetime(r["entry_date"]).normalize()
-        end = pd.to_datetime(r["exit_date"]).normalize()
-        if start in in_pos.index or end in in_pos.index:
-            in_pos.loc[start:end] = True
-    return float(in_pos.mean() * 100.0)
+            # check for stalling day
+            if (0 < today['pct_change'] <= stall_pct_gain) \
+                    and (today['volume'] >= yesterday['volume'] * 0.95) \
+                    and (today['close'] < ((today['high'] + today['low']) / 2)) \
+                    and (today['close'] >= 0.97 * today['rolling_high']):
+                active_ddays.append((i, today['close']))
+
+            # remove expired d-days
+            active_ddays = [(idx, c) for idx, c in active_ddays if (i - idx) <= decay_window]
+            # remove big rally days (6% rule)
+            active_ddays = [(idx, c) for idx, c in active_ddays if (today['high'] - c) / c < rally_pct]
+
+            if today['close'] < ftd_low:
+                in_uptrend = False
+                ftd_low = np.nan
+                active_ddays = []  # reset d-days
+                rally_active = False
+                rally_count = 0
+                rally_low = today['low']
+            elif len(active_ddays) >= dday_exit:
+                in_uptrend = False
+                ftd_low = np.nan
+                active_ddays = []
+                rally_active = False
+                rally_count = 0
+                rally_low = today['low']
+
+        """
+        — track rally attempt (3+ days off a low without undercutting that low)
+            — on day 4+ of rally attempt, IF pct_change >= 0.01
+               AND today.volume > prev.volume:
+                 market_status = "CONFIRMED UPTREND"
+                 CLEAR active_ddays[]
+                 in_uptrend = TRUE
+
+        Day 1 of rally close > yesterday close, rally_low is lesser of today and yesterday low
+        Subsequent days are counted towards the rally goal of 4 days if the low does not go past the recorded rally low
+        """
+        if not in_uptrend:
+            if not rally_active:
+                if today['close'] > yesterday['close']:
+                    rally_count = 1
+                    rally_active = True
+                    rally_low = min(today['low'], yesterday['low'])
+                else:
+                    rally_low = min(today['low'], rally_low)
+
+            elif rally_active:
+                if today['low'] < rally_low:
+                    rally_active = False
+                    rally_count = 0
+                    rally_low = today['low']
+                else:
+                    rally_count += 1
+                    if rally_count >= ftd_min_day \
+                            and (today['pct_change'] >= ftd_min_gain) \
+                            and today['volume'] > yesterday['volume']:
+                        ftd_low = today['low']
+                        ftd_day = True
+                        in_uptrend = True
+                        active_ddays = []
+                        rally_active = False
+                        rally_count = 0
 
 
-def trade_stats(trades: pd.DataFrame) -> pd.Series:
-    t = trades.copy()
+            if not ftd_day:
+                if (today['high'] > yesterday['high'] > two_days_ago['high']) \
+                        and (today['low'] > yesterday['low'] > two_days_ago['low']):
+                    ftd_low = min(today['low'], yesterday['low'], two_days_ago['low'])
+                    in_uptrend = True
+                    active_ddays = []
+                    rally_active = False
+                    rally_count = 0
 
-    if "net_pnl" not in t.columns:
-        t["net_pnl"] = t["pnl"] - t.get("fees", 0.0)
 
-    t["duration_minutes"] = (t["exit_dt"] - t["entry_dt"]).dt.total_seconds() / 60.0
+        df.loc[dt, 'ftd_low'] = ftd_low
+        df.loc[dt, 'in_uptrend'] = in_uptrend
+        df.loc[dt, 'dday_count'] = len(active_ddays)
 
-    wins = t[t["net_pnl"] > 0]
-    losses = t[t["net_pnl"] < 0]
-
-    gross_win = wins["net_pnl"].sum()
-    gross_loss = losses["net_pnl"].sum()  # negative
-
-    profit_factor = np.nan if gross_loss == 0 else float(gross_win / abs(gross_loss))
-    win_rate = np.nan if len(t) == 0 else float(len(wins) / len(t))
-
-    out = {
-        "Total Trades": int(len(t)),
-        "Win Rate [%]": win_rate * 100.0,
-        "Profit Factor": profit_factor,
-        "Expectancy (avg net pnl / trade)": float(t["net_pnl"].mean()) if len(t) else np.nan,
-        "Best Trade [$]": float(t["net_pnl"].max()) if len(t) else np.nan,
-        "Worst Trade [$]": float(t["net_pnl"].min()) if len(t) else np.nan,
-        "Avg Winning Trade [$]": float(wins["net_pnl"].mean()) if len(wins) else np.nan,
-        "Avg Losing Trade [$]": float(losses["net_pnl"].mean()) if len(losses) else np.nan,
-        "Avg Winning Duration [minutes]": float(wins["duration_minutes"].mean()) if len(wins) else np.nan,
-        "Avg Losing Duration [minutes]": float(losses["duration_minutes"].mean()) if len(losses) else np.nan,
-        "Total Fees Paid": float(t.get("fees", 0.0).sum()) if "fees" in t.columns else 0.0,
-    }
-    return pd.Series(out)
-
-def portfolio_stats_options(nlv: pd.Series, trades: pd.DataFrame,
-                            cash: pd.Series | None = None,
-                            margin: pd.Series | None = None,
-                            ann_factor=252, rf_daily=0.0, omega_threshold=0.0) -> pd.Series:
-    aligned = _align_series(nlv, cash=cash, margin=margin)
-    nlv = aligned["nlv"]
-
-    daily_rets = nlv.pct_change().fillna(0.0)
-
-    dd, max_dd, max_dd_dur = max_drawdown_stats(nlv)
-    _cagr = cagr_from_equity(nlv)
-    sharpe, sortino = sharpe_sortino(daily_rets, ann_factor=ann_factor, rf_daily=rf_daily)
-    calmar = np.nan if max_dd == 0 else float(_cagr / abs(max_dd))
-    omega = omega_ratio(daily_rets, threshold=omega_threshold)
-
-    out = {
-        "Start Index": nlv.index[0],
-        "End Index": nlv.index[-1],
-        "Total Duration": nlv.index[-1] - nlv.index[0],
-        "Start Value": float(nlv.iloc[0]),
-        "Min Value": float(nlv.min()),
-        "Max Value": float(nlv.max()),
-        "End Value": float(nlv.iloc[-1]),
-        "Total Return [%]": float((nlv.iloc[-1] / nlv.iloc[0] - 1.0) * 100.0),
-        "CAGR [%]": float(_cagr * 100.0),
-        "Max Drawdown [%]": float(max_dd * 100.0),
-        "Max Drawdown Duration [days]": int(max_dd_dur),
-        "Sharpe Ratio": float(sharpe),
-        "Calmar Ratio": float(calmar),
-        "Omega Ratio": float(omega),
-        "Sortino Ratio": float(sortino),
-    }
-
-    # "Position Coverage" from trades
-    if trades is not None and len(trades):
-        out["Position Coverage [%]"] = position_coverage(trades, nlv.index)
-
-    # Margin utilization as "exposure" proxy
-    if margin is not None:
-        margin_aligned = aligned["margin"]
-        util = (margin_aligned / nlv.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan)
-        out["Max Margin Utilization [%]"] = float(util.max() * 100.0)
-        out["Avg Margin Utilization [%]"] = float(util.mean() * 100.0)
-
-    # Cash utilization (optional sanity checks)
-    if cash is not None:
-        cash_aligned = aligned["cash"]
-        out["Min Cash"] = float(cash_aligned.min())
-        out["Avg Cash"] = float(cash_aligned.mean())
-
-    # Trade stats block
-    if trades is not None and len(trades):
-        out.update(trade_stats(trades).to_dict())
-
-    return pd.Series(out)
+    return df
 
 def first_true_ts(s: pd.Series):
     """Return timestamp of first True in a boolean Series, else NaT."""
     return s.index[s].min() if s.any() else pd.NaT
-
-def snap(target_value, available_values):
-    selected_value = min(available_values, key=lambda x: abs(x - target_value))
-    return selected_value
 
 def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
     """Print comprehensive backtest results."""
@@ -189,8 +163,9 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
     pct_in_market = days_in_trade / len(daily)
 
     # Calculate daily returns from portfolio value
-    daily_returns = daily['portfolio_value'].pct_change()
-    invested_returns = daily_returns[daily['in_trade']]
+    daily_returns = daily['portfolio_value'].pct_change().dropna()
+    daily_in_trade = daily['in_trade'][-(len(daily_returns)):]
+    invested_returns = daily_returns[daily_in_trade]
     trading_days = 252
     risk_free_rate = 0.04
 
@@ -209,10 +184,7 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
     invested_downside_returns = invested_excess_returns[invested_excess_returns < 0]
     invested_downside_std = np.sqrt((np.minimum(invested_excess_returns, 0) ** 2).mean())
     sortino = (excess_returns.mean() / downside_std) * np.sqrt(trading_periods)
-    if invested_downside_std != 0:
-        sortino_invested = (invested_excess_returns.mean() / invested_downside_std) * np.sqrt(trading_periods)
-    else:
-        sortino_invested = np.nan
+    sortino_invested = (invested_excess_returns.mean() / invested_downside_std) * np.sqrt(trading_periods)
 
     # CALMAR RATIO (CAGR / max drawdown)
     calmar = abs(cagr / max_dd) if max_dd != 0 else float('inf')
@@ -225,10 +197,7 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
 
     invested_gains = invested_excess_returns[invested_excess_returns > 0].sum()
     invested_losses = abs(invested_excess_returns[invested_excess_returns < 0].sum())
-    if invested_losses != 0:
-        omega_invested = invested_gains / invested_losses
-    else:
-        omega_invested = np.nan
+    omega_invested = invested_gains / invested_losses
 
     print(f"\nPeriod:            {start_date} to {end_date} ({years:.1f} years)")
     print(f"Ticker:              {ticker}")
@@ -272,7 +241,6 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
 
     avg_win = np.mean([t['pnl_pct'] for t in winners]) if winners else 0
     avg_loss = np.mean([t['pnl_pct'] for t in losers]) if losers else 0
-
     avg_hold_win = np.mean([t['holding_period'] for t in winners]) if winners else 0
     avg_hold_loss = np.mean([t['holding_period'] for t in losers]) if losers else 0
 
@@ -284,8 +252,8 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
     gross_losses = sum(t['pnl'] for t in losers) if losers else 0
     profit_factor = abs(gross_wins / gross_losses) if gross_losses != 0 else float('inf')
 
-    # avg_peak = np.mean([t['peak_gain_pct'] for t in closed_trades]) if closed_trades else 0
-    # avg_dd = np.mean([t['max_drawdown_pct'] for t in closed_trades]) if closed_trades else 0
+    avg_peak = np.mean([t['peak_gain_pct'] for t in closed_trades]) if closed_trades else 0
+    avg_dd = np.mean([t['max_drawdown_pct'] for t in closed_trades]) if closed_trades else 0
 
     print(f"\n--- Trade Statistics ({n_closed} closed trades) ---")
     print(f"Total trades:        {n_trades} ({n_closed} closed, "
@@ -296,8 +264,8 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
     print(f"Largest winner:      {largest_win:+.1%}")
     print(f"Largest loser:       {largest_loss:+.1%}")
     print(f"Profit factor:       {profit_factor:.2f}")
-    # print(f"Avg peak gain:       {avg_peak:+.1%}")
-    # print(f"Avg max drawdown:    {avg_dd:.1%}")
+    print(f"Avg peak gain:       {avg_peak:+.1%}")
+    print(f"Avg max drawdown:    {avg_dd:.1%}")
     print(f"Total P&L:           ${total_pnl:+,.0f}")
 
     # --- Exit reason breakdown ---
@@ -324,15 +292,13 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
 
     # --- Trade log ---
     print(f"\n--- Trade Log ---")
-    print(f"{'Entry':>12s} {'Exit':>12s} {'Entry$':>10s} {'Exit$':>10s} "
-          f"{'Return':>8s} {'Days':>5s}  {'Reason'}")
-    print("-" * 85)
+    print(f"{'Entry':>20s} {'Exit':>26s} {'Entry$':>18s} {'Exit$':>12s} {'Return':>12s} {'Days':>10s}  {'Reason':>10s}")
+    print("-" * 125)
     for t in trades_:
-        print(f"{t['entry_dt']:>12s} {t['exit_dt']:>12s} "
-              f"${t['entry_px']:>9.2f} ${t['exit_px']:>9.2f} "
-              f"{t['pnl_pct']:>+7.1%} {t['holding_period']:>5d}  {t['exit_reason']}")
+        print(f"{t['entry_dt']}{'':>8s} {t['exit_dt']}{'':>12s}${t['entry_px']:>6.2f}      ${t['exit_px']:>6.2f}      {t['pnl_pct']:>+7.1%}      {t['holding_period']:>5d}       {t['exit_reason']}")
 
-    print("=" * 70)
+
+    print("=" * 125)
 
     portfolio_stats = {
         'Period': f'{start_date} to {end_date} ({years:.1f} years)',
@@ -366,8 +332,8 @@ def print_report(ticker, trades, daily, strategy, frequency = 'daily'):
         'Largest winner': f'{largest_win:+.1%}',
         'Largest loser': f'{largest_loss:+.1%}',
         'Profit factor': f'{profit_factor:.2f}',
-        # 'Avg peak gain': f'{avg_peak:+.1%}',
-        # 'Avg max drawdown': f'{avg_dd:.1%}',
+        'Avg peak gain': f'{avg_peak:+.1%}',
+        'Avg max drawdown': f'{avg_dd:.1%}',
         'Total P&L': f'${total_pnl:+,.0f}'
     }
 

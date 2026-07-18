@@ -183,8 +183,8 @@ KEY DIFFERENCES FROM VIBHA:
 
 The tradeable universe is: XLK/TECL, SPY/UPRO, QQQ/TQQQ, and SMH/SOXL.
 """
-base_ticker = 'GDX'
-leveraged_ticker = 'NUGT'
+base_ticker = 'QQQ'
+leveraged_ticker = 'TQQQ'
 fast_period = 12
 slow_period = 26
 signal_period = 9
@@ -240,7 +240,8 @@ if __name__ == '__main__':
     current_trade = None
     stopped_out = False
     trades = []
-    daily_record = []
+    weekly_record = []
+    base_record = []
     for dt in dts:
 
         if current_trade is not None:
@@ -315,15 +316,23 @@ if __name__ == '__main__':
                 active_stop = max(hard_stop, trailing_stop)
                 stopped_out = False
 
-        # record daily record
-        daily_record.append({
+        # record daily/weekly record
+        weekly_record.append({
             'date': dt,
             'close': df_lev.loc[dt, 'close'],
             'portfolio_value': equity + (current_trade['shares'] * df_lev.loc[dt, 'close'] if current_trade else 0),
             'in_trade': current_trade is not None,
         })
 
-    df_daily = pd.DataFrame(daily_record)
+        # record base equity values
+        base_record.append({
+            'date': dt,
+            'base_close': df_base.loc[dt, 'close'],
+            'base_macd': df_base.loc[dt, 'macd'],
+            'base_macd_signal': df_base.loc[dt, 'macd_signal'],
+        })
+
+    df_daily = pd.DataFrame(weekly_record)
     df_daily.set_index('date', inplace=True)
     df_trades = pd.DataFrame(trades)
     ticker = f'{base_ticker}/{leveraged_ticker}'
@@ -335,4 +344,14 @@ if __name__ == '__main__':
     trades_fn = output_folder.joinpath(f"trades_{leveraged_ticker}.csv")
     portfolio_stats.to_csv(portfolio_stats_fn, index=True)
     trade_stats.to_csv(trades_stats_fn, index=True)
+
+    # save records
+    df_daily_fn = output_folder.joinpath(f"daily_{base_ticker}_{leveraged_ticker}.csv")
+    df_daily.to_csv(df_daily_fn, index=True)
     df_trades.to_csv(trades_fn, index=False)
+    df_base_record = pd.DataFrame(base_record)
+    df_base_record.set_index('date', inplace=True)
+    base_record_fn = output_folder.joinpath(f"base_record_{base_ticker}.csv")
+    df_base_record.to_csv(base_record_fn, index=True)
+
+

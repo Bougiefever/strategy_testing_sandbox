@@ -30,11 +30,12 @@ df_base = df_base.resample('W-FRI').agg({
     'close': 'last',
     'volume': 'sum',
 }).dropna()
+
 df_base[f'{base_ticker}_macd'], df_base[f'{base_ticker}_macd_signal'], df_base['macd_hist'] = talib.MACD(df_base['close'].to_numpy(float), fast_period,
                                                                         slow_period, signal_period)
 
-df_base['macd_reg_slope'] = df_base['macd'].rolling(window=lin_regress_lookback).apply(lambda x: linregress(np.arange(lin_regress_lookback), x).slope, raw=True)
-df_base['macd_reg_r2'] = df_base['macd'].rolling(window=lin_regress_lookback).apply(lambda x: linregress(np.arange(lin_regress_lookback), x).rvalue ** 2, raw=True)
+df_base['macd_reg_slope'] = df_base[f'{base_ticker}_macd'].rolling(window=lin_regress_lookback).apply(lambda x: linregress(np.arange(lin_regress_lookback), x).slope, raw=True)
+df_base['macd_reg_r2'] = df_base[f'{base_ticker}_macd'].rolling(window=lin_regress_lookback).apply(lambda x: linregress(np.arange(lin_regress_lookback), x).rvalue ** 2, raw=True)
 df_base['macd_slope_change'] = df_base['macd_reg_slope'].diff()
 
 lev_fn = stock_folder.joinpath(f'{leveraged_ticker}.parquet')

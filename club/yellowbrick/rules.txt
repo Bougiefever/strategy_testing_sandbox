@@ -1,0 +1,7 @@
+
+
+Only bullish
+after pitch, wait for macd crossover for signal
+only enter if positive within 30 days? (time)
+if return <= 10% during first 16 days after signal, quit even if in trade
+

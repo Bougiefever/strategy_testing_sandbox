@@ -1,15 +1,13 @@
-standard_fee=0.65
+standard_fee=0.50
 incur_fees=true
-slippage=0.05
-apply_slippage=true
-fill_factor=0.5 # 0 = no slippage 1.0 = 0 = bid or ask, percentage is percentage between
+fill_factor=0.75 # 0 = no slippage 1.0 = 0 = bid or ask, percentage is percentage between
 
 options_directory =  "D:\\options_data"
 data_frequency = 'intraday'
 minute_granularity = 1
 start_time = '09_30'
 end_time = '16_00'
-exclude_shortdays = false
+exclude_shortdays = true
 
 # exclude all economic days. includes witching, fomc, ppi an cpi
 exclude_economic = false

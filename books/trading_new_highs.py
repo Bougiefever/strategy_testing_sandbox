@@ -77,7 +77,6 @@ for stock_file in stock_files:
     if not calc_fn.exists():
         continue
 
-
     stock_fn = stock_folder.joinpath(f'{ticker}_.parquet')
     calc_fn = stock_calcs_folder.joinpath(f'{ticker}_calcs.parquet')
 
